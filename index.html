@@ -63,19 +63,19 @@ li b{font-size:16px}
 <script>
 const v=document.getElementById('v'), durum=document.getElementById('durum'), sonuc=document.getElementById('sonuc');
 let aktif={}, gecmis=[], worker=null, workerYukleniyor=null, mod=null, mesgul=false, sonOkunan='', sonOkunanSay=0, sonIslem={}, akis=null, zamanlayici=null;
-const BEKLEME=60000; // otomatikte aynı plaka 60 sn içinde tekrar işlenmez
+const BEKLEME=30000; // en az 30 sn geçmeden aynı plaka çıkış sayılmaz
 
 function yukle(){try{aktif=JSON.parse(localStorage.getItem('pl_aktif')||'{}');gecmis=JSON.parse(localStorage.getItem('pl_gecmis')||'[]');}catch(e){}}
 function kaydet(){try{localStorage.setItem('pl_aktif',JSON.stringify(aktif));localStorage.setItem('pl_gecmis',JSON.stringify(gecmis));}catch(e){}}
 function saat(t){const d=new Date(t);return d.toLocaleDateString('tr-TR')+' '+d.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});}
-function sure(ms){const dk=Math.floor(ms/60000),s=Math.floor(dk/60),k=dk%60;
-  if(s>=24){const g=Math.floor(s/24);return g+' gün '+(s%24)+' saat '+k+' dk';}
-  return s>0?(s+' saat '+k+' dk'):(k+' dk');}
+function sure(ms){const top=Math.max(0,Math.floor(ms/1000)),sn=top%60,dk=Math.floor(top/60)%60,s=Math.floor(top/3600);
+  let t=[];if(s>=24){t.push(Math.floor(s/24)+' gün');if(s%24)t.push((s%24)+' saat');}else if(s)t.push(s+' saat');
+  if(dk)t.push(dk+' dk');t.push(sn+' sn');return t.join(' ');}
 
 function ciz(){
   const a=document.getElementById('aktif');a.innerHTML='';
   Object.keys(aktif).forEach(p=>{const li=document.createElement('li');
-    li.innerHTML='<b>'+p+'</b> — giriş: '+saat(aktif[p])+' ('+sure(Date.now()-aktif[p])+')';a.appendChild(li);});
+    li.innerHTML='<b>'+p+'</b> — giriş: '+saat(aktif[p])+'<br>⏱ <b style="color:#ffcc66">'+sure(Date.now()-aktif[p])+'</b>';a.appendChild(li);});
   if(!a.innerHTML)a.innerHTML='<li>Yok</li>';
   const g=document.getElementById('gecmis');g.innerHTML='';
   gecmis.slice().reverse().forEach(r=>{const li=document.createElement('li');
@@ -89,6 +89,9 @@ function goster(txt,sinif){sonuc.className=sinif;sonuc.innerHTML=txt;sonuc.style
 function islem(p,zorla){
   const simdi=Date.now();
   if(!zorla&&sonIslem[p]&&simdi-sonIslem[p]<BEKLEME)return;
+  if(aktif[p]&&simdi-aktif[p]<BEKLEME){
+    if(zorla)goster('<b>'+p+'</b> zaten kayıtlı<br>Çıkış için en az 30 sn geçmeli ('+sure(simdi-aktif[p])+' geçti)','giris');
+    return;}
   sonIslem[p]=simdi;
   if(aktif[p]){
     const g=aktif[p];delete aktif[p];gecmis.push({p:p,g:g,c:simdi});
@@ -215,7 +218,7 @@ document.getElementById('elleBtn').onclick=()=>{
   if(!p){durum.textContent='Geçersiz plaka';return;}
   islem(p,true);document.getElementById('elle').value='';};
 document.getElementById('silBtn').onclick=()=>{gecmis=[];kaydet();ciz();};
-setInterval(ciz,60000);
+setInterval(ciz,1000);
 yukle();ciz();
 okuyucuHazirla().catch(()=>{}); // arka planda önceden yükle
 </script>
