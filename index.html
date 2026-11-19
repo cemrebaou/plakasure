@@ -34,7 +34,7 @@ li b{font-size:16px}
 </style>
 </head>
 <body>
-<header><button id="geriBtn" class="gri" style="display:none">← Geri</button><span id="baslik">🚗 Plaka Süre</span></header>
+<header><button id="geriBtn" class="gri" style="display:none">← Geri</button><span id="baslik">🚗 Plaka Süre</span><small style="color:#888;font-weight:400">v1.1</small></header>
 
 <!-- SEÇİM EKRANI -->
 <div id="secim" class="ekran acik">
@@ -46,7 +46,7 @@ li b{font-size:16px}
 
 <!-- KAMERA EKRANI -->
 <div id="kamera" class="ekran">
-  <div id="cam"><video id="v" autoplay playsinline muted></video><div id="box"></div></div>
+  <div id="cam"><video id="v" autoplay playsinline muted></video></div>
   <div id="durum"></div>
   <canvas id="onizleme" style="display:none;max-width:70%;height:auto;margin:0 auto;border-radius:4px"></canvas>
   <div id="sonuc"></div>
@@ -107,7 +107,7 @@ function islem(p,zorla){
 // OCR metninden Türk plakası çıkar (harf/rakam karışıklıklarını düzelterek)
 const IL={1:[4],2:[3,4],3:[2,3]}; // harf sayısı -> izinli rakam sayıları
 const toD={O:'0',D:'0',Q:'0',U:'0',I:'1',L:'1',J:'1',Z:'2',S:'5',B:'8',G:'6',T:'7',A:'4'};
-const toL={'0':'O','1':'I','2':'Z','5':'S','8':'B','6':'G','4':'A','7':'T'};
+const toL={'0':'O','1':'I','2':'Z','5':'S','8':'B','6':'G','4':'A','7':'T',Q:'O',W:'V',X:'K'};
 function plakaBul(t){
   let s=(t||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^TR/,'');
   let en=null;
@@ -118,7 +118,7 @@ function plakaBul(t){
     for(const L of [1,2,3])for(const N of IL[L]){
       if(i+2+L+N>s.length)continue;
       let m=maliyet,har='',rak='',ok=true;
-      for(const c of s.substr(i+2,L)){if(/[A-Z]/.test(c))har+=c;else if(toL[c]){har+=toL[c];m++;}else ok=false;}
+      for(const c of s.substr(i+2,L)){if(/[A-PR-VYZ]/.test(c))har+=c;else if(toL[c]){har+=toL[c];m++;}else ok=false;}
       for(const c of s.substr(i+2+L,N)){if(/\d/.test(c))rak+=c;else if(toD[c]){rak+=toD[c];m++;}else ok=false;}
       if(!ok)continue;
       const puan=m*10-(L+N); // az düzeltme, uzun plaka tercih
@@ -128,30 +128,7 @@ function plakaBul(t){
   return en&&en.puan<20?en.p:null;
 }
 
-function otsu(d){
-  const h=new Array(256).fill(0),n=d.length/4;
-  for(let i=0;i<d.length;i+=4)h[d[i]]++;
-  let top=0;for(let i=0;i<256;i++)top+=i*h[i];
-  let sB=0,wB=0,max=0,esik=127;
-  for(let i=0;i<256;i++){wB+=h[i];if(!wB)continue;const wF=n-wB;if(!wF)break;
-    sB+=i*h[i];const mB=sB/wB,mF=(top-sB)/wF,v2=wB*wF*(mB-mF)*(mB-mF);if(v2>max){max=v2;esik=i;}}
-  return esik;
-}
-
-// Kesilen bölgeyi büyüt, siyah-beyaz yap, kenar boşluğu ekle
-function hazirla(sx,sy,sw,sh,hedefH){
-  const o=hedefH/sh,P=20;
-  const c=document.createElement('canvas');c.width=Math.round(sw*o)+2*P;c.height=Math.round(sh*o)+2*P;
-  const x=c.getContext('2d',{willReadFrequently:true});x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
-  x.filter='grayscale(1)';x.drawImage(v,sx,sy,sw,sh,P,P,c.width-2*P,c.height-2*P);x.filter='none';
-  const im=x.getImageData(0,0,c.width,c.height),d=im.data;
-  for(let i=0;i<d.length;i+=4){const g=(d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11)|0;d[i]=d[i+1]=d[i+2]=g;}
-  const e=otsu(d);
-  for(let i=0;i<d.length;i+=4){const k=d[i]>e?255:0;d[i]=d[i+1]=d[i+2]=k;}
-  x.putImageData(im,0,0);return c;
-}
-
-// Mavi TR şeridini bul -> plaka dikdörtgenleri
+// Mavi TR şeridini bul -> plaka bölgeleri (video koordinatında)
 function plakaAdaylari(){
   const vw=v.videoWidth,vh=v.videoHeight,W=640,sc=W/vw,H=Math.round(vh*sc);
   const c=document.createElement('canvas');c.width=W;c.height=H;
@@ -168,36 +145,71 @@ function plakaAdaylari(){
       if(py>0&&mask[k-W]===1){mask[k-W]=2;yig.push(k-W);}
       if(py<H-1&&mask[k+W]===1){mask[k+W]=2;yig.push(k+W);}}
     const w=x1-x0+1,h=y1-y0+1,oran=h/w;
-    if(h>=8&&oran>1.2&&oran<5&&say/(w*h)>0.45)aday.push({x0,x1,y0,y1,h,alan:say});
+    if(h>=8&&oran>1.2&&oran<5&&say/(w*h)>0.45)aday.push({x0,y0,w,h,alan:say});
   }
   aday.sort((a,b)=>b.alan-a.alan);
   return aday.slice(0,3).map(a=>{
-    const pad=a.h*0.06,bx=a.x1+1,ex=Math.min(W,a.x0+a.h*4.8),by=Math.max(0,a.y0-pad),ey=Math.min(H,a.y1+pad);
+    const pad=a.h*0.25,bx=a.x0,ex=Math.min(W,a.x0+a.h*7),by=Math.max(0,a.y0-pad),ey=Math.min(H,a.y0+a.h+pad);
     return {sx:bx/sc,sy:by/sc,sw:(ex-bx)/sc,sh:(ey-by)/sc};
-  }).filter(r=>r.sw>r.sh*2);
+  });
+}
+
+// Plaka bölgesini temizle: mavi şeridi sil, sağ kenarı bul, siyah-beyaz yap, çerçeveyi sil, küçült
+function plakaHazirla(r){
+  const Hh=110,Ww=Math.max(1,Math.round(r.sw*Hh/r.sh));
+  const c=document.createElement('canvas');c.width=Ww;c.height=Hh;
+  const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(v,r.sx,r.sy,r.sw,r.sh,0,0,Ww,Hh);
+  const d=x.getImageData(0,0,Ww,Hh).data,g=new Uint8Array(Ww*Hh);
+  for(let i=0,j=0;j<Ww*Hh;i+=4,j++)g[j]=(d[i+2]-d[i]>40)?255:((d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11)|0);
+  // sütunların en parlak değeri (%97) -> plakanın bittiği yer
+  const p=new Uint8Array(Ww),kol=new Uint8Array(Hh);
+  for(let cx=0;cx<Ww;cx++){for(let y=0;y<Hh;y++)kol[y]=g[y*Ww+cx];p[cx]=Array.from(kol).sort((a,b)=>a-b)[Math.floor(Hh*0.97)];}
+  const ilk=Array.from(p.slice(0,Math.min(330,Ww))).sort((a,b)=>a-b),Wl=ilk[ilk.length>>1];
+  let kenar=Ww,seri=0;
+  for(let cx=352;cx<Ww;cx++){if(p[cx]<0.6*Wl){if(++seri>=8){kenar=cx-7;break;}}else seri=0;}
+  // otsu eşiği
+  const hst=new Array(256).fill(0);let n=0,top=0;
+  for(let y=0;y<Hh;y++)for(let cx=0;cx<kenar;cx++){hst[g[y*Ww+cx]]++;n++;}
+  for(let i=0;i<256;i++)top+=i*hst[i];
+  let sB=0,wB=0,max=0,esik=127;
+  for(let i=0;i<256;i++){wB+=hst[i];if(!wB)continue;const wF=n-wB;if(!wF)break;
+    sB+=i*hst[i];const mB=sB/wB,mF=(top-sB)/wF,vv=wB*wF*(mB-mF)*(mB-mF);if(vv>max){max=vv;esik=i;}}
+  // siyah=1, kenara değen siyah parçaları (çerçeve) sil
+  const K=kenar,bw=new Uint8Array(K*Hh);
+  for(let y=0;y<Hh;y++)for(let cx=0;cx<K;cx++)bw[y*K+cx]=g[y*Ww+cx]>esik?0:1;
+  const yig=[];
+  const it=k=>{if(bw[k]===1){bw[k]=0;yig.push(k);}};
+  for(let cx=0;cx<K;cx++){it(cx);it((Hh-1)*K+cx);}
+  for(let y=0;y<Hh;y++){it(y*K);it(y*K+K-1);}
+  while(yig.length){const k=yig.pop(),px=k%K,py=(k-px)/K;
+    if(px>0)it(k-1);if(px<K-1)it(k+1);if(py>0)it(k-K);if(py<Hh-1)it(k+K);}
+  const t=document.createElement('canvas');t.width=K;t.height=Hh;
+  const tx=t.getContext('2d'),im=tx.createImageData(K,Hh);
+  for(let j=0;j<K*Hh;j++){const q=bw[j]?0:255;im.data[j*4]=im.data[j*4+1]=im.data[j*4+2]=q;im.data[j*4+3]=255;}
+  tx.putImageData(im,0,0);
+  // yazı yüksekliği ~45px en iyi okunuyor
+  const o=document.createElement('canvas'),P=8,s=0.4;o.width=Math.round(K*s)+2*P;o.height=Math.round(Hh*s)+2*P;
+  const ox=o.getContext('2d');ox.fillStyle='#fff';ox.fillRect(0,0,o.width,o.height);
+  ox.imageSmoothingEnabled=true;ox.imageSmoothingQuality='high';ox.drawImage(t,P,P,o.width-2*P,o.height-2*P);
+  return o;
 }
 
 function onizle(c){const o=document.getElementById('onizleme'),x=o.getContext('2d');
   o.width=c.width;o.height=c.height;x.drawImage(c,0,0);o.style.display='block';}
 
 async function kareOku(){
-  // 1) Mavi şeritten plakayı bul ve sadece onu oku
   for(const r of plakaAdaylari()){
-    const c=hazirla(r.sx,r.sy,r.sw,r.sh,110);
+    const c=plakaHazirla(r);
     const t=(await worker.recognize(c)).data.text;
-    onizle(c);
-    const p=plakaBul(t);if(p)return p;
+    const p=plakaBul(t);if(p){onizle(c);return p;}
   }
-  // 2) Bulamazsa yeşil kutunun tamamında dağınık metin ara
-  const vw=v.videoWidth,vh=v.videoHeight;
-  const c=hazirla(vw*0.1,vh*0.38,vw*0.8,vh*0.24,Math.min(600,vh*0.24*2));
-  await worker.setParameters({tessedit_pageseg_mode:'11'});
-  let t='';try{t=(await worker.recognize(c)).data.text;}finally{await worker.setParameters({tessedit_pageseg_mode:'7'});}
-  return plakaBul(t);
+  return null;
 }
+
 // Otomatik: sürekli tarar, aynı plakayı 2 kez görünce kabul eder
 async function otoTur(){
-  if(mod!=='oto'||mesgul||!worker||!v.videoWidth)return;
+  if(mod!=='oto')return;
+  if(mesgul||!worker||!v.videoWidth){zamanlayici=setTimeout(otoTur,300);return;}
   mesgul=true;
   try{
     const p=await kareOku();
@@ -206,9 +218,10 @@ async function otoTur(){
       if(p===sonOkunan)sonOkunanSay++;else{sonOkunan=p;sonOkunanSay=1;}
       durum.textContent='Okunan: '+p;
       if(sonOkunanSay>=2){islem(p,false);sonOkunanSay=0;}
-    }else durum.textContent='Plakayı yeşil kutuya getirin…';
+    }else durum.textContent='Plaka aranıyor…';
   }catch(e){durum.textContent='Okuma hatası';}
   mesgul=false;
+  if(mod==='oto')zamanlayici=setTimeout(otoTur,150);
 }
 
 // Manuel: OKU'ya basınca birkaç kare dener, ilk bulduğunu işler
@@ -218,10 +231,10 @@ async function manuelOku(){
   if(!v.videoWidth){durum.textContent='Kamera hazır değil';return;}
   mesgul=true;const btn=document.getElementById('okuBtn');btn.disabled=true;btn.textContent='Okunuyor…';
   let p=null;
-  for(let i=0;i<3&&!p&&mod==='man';i++){try{p=await kareOku();}catch(e){}}
+  for(let i=0;i<6&&!p&&mod==='man';i++){try{p=await kareOku();}catch(e){}if(!p)await new Promise(r=>setTimeout(r,120));}
   if(mod==='man'){
     if(p){durum.textContent='Okunan: '+p;islem(p,true);}
-    else durum.textContent='Okunamadı. Plakayı kutuya ortalayıp tekrar basın veya elle yazın.';
+    else durum.textContent='Okunamadı. Biraz yaklaşıp tekrar basın veya elle yazın.';
   }
   btn.disabled=false;btn.textContent='🔍 OKU';mesgul=false;
 }
@@ -239,7 +252,7 @@ function okuyucuHazirla(){
 
 async function kameraAc(){
   try{
-    akis=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+    akis=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
     v.srcObject=akis;return true;
   }catch(e){durum.textContent='Kamera açılamadı (izin verin). Elle ekleyebilirsiniz.';return false;}
 }
@@ -261,12 +274,12 @@ async function modAc(m){
   if(!worker)durum.textContent='Okuyucu yükleniyor…';
   try{await okuyucuHazirla();}catch(e){durum.textContent='Okuyucu yüklenemedi (internet gerekli). Elle ekleyebilirsiniz.';return;}
   if(mod!==m)return;
-  if(ok)durum.textContent=m==='oto'?'Hazır. Plakayı yeşil kutuya getirin.':'Hazır. Plakayı kutuya getirip OKU’ya basın.';
-  if(m==='oto'){clearInterval(zamanlayici);zamanlayici=setInterval(otoTur,1200);}
+  if(ok)durum.textContent=m==='oto'?'Hazır. Plakayı kameraya gösterin.':'Hazır. Plakaya tutup OKU’ya basın.';
+  if(m==='oto'){clearTimeout(zamanlayici);otoTur();}
 }
 
 function geri(){
-  mod=null;clearInterval(zamanlayici);zamanlayici=null;kameraKapat();
+  mod=null;clearTimeout(zamanlayici);zamanlayici=null;kameraKapat();
   document.getElementById('kamera').classList.remove('acik');
   document.getElementById('secim').classList.add('acik');
   document.getElementById('geriBtn').style.display='none';
