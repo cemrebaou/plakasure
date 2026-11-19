@@ -8,7 +8,13 @@
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,Arial,sans-serif;background:#111;color:#eee}
-header{padding:10px 14px;font-weight:700;font-size:18px;background:#1b1b1b}
+header{padding:10px 14px;font-weight:700;font-size:18px;background:#1b1b1b;display:flex;align-items:center;gap:10px}
+header button{flex:0;padding:8px 14px;font-size:15px}
+#baslik{flex:1}
+.ekran{display:none}.ekran.acik{display:block}
+#secim{padding:20px 14px}
+#secim button{display:block;width:100%;padding:26px;font-size:22px;margin-bottom:14px;border-radius:12px}
+#secim p{color:#aaa;font-size:14px;margin:-6px 4px 18px}
 #cam{position:relative;width:100%;max-width:640px;margin:0 auto;background:#000}
 video{width:100%;display:block}
 #box{position:absolute;left:10%;top:38%;width:80%;height:24%;border:3px solid #0f0;border-radius:8px;pointer-events:none}
@@ -18,6 +24,8 @@ video{width:100%;display:block}
 .btns{display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap}
 button{flex:1;padding:12px;font-size:16px;border:0;border-radius:8px;background:#2d6cdf;color:#fff}
 button.gri{background:#444}
+button.yesil{background:#1f8a3a}
+#okuBtn{font-size:22px;padding:20px}
 input{flex:2;padding:12px;font-size:16px;border-radius:8px;border:0;text-transform:uppercase}
 h3{margin:14px 12px 4px;font-size:15px;color:#9cf}
 ul{list-style:none;margin:0;padding:0 12px}
@@ -26,26 +34,36 @@ li b{font-size:16px}
 </style>
 </head>
 <body>
-<header>🚗 Plaka Süre</header>
-<div id="cam"><video id="v" autoplay playsinline muted></video><div id="box"></div></div>
-<div id="durum">Kamera açılıyor…</div>
-<div id="sonuc"></div>
-<div class="btns">
-  <button id="otoBtn">Otomatik Okuma: AÇIK</button>
-  <button id="okuBtn" class="gri">Şimdi Oku</button>
+<header><button id="geriBtn" class="gri" style="display:none">← Geri</button><span id="baslik">🚗 Plaka Süre</span></header>
+
+<!-- SEÇİM EKRANI -->
+<div id="secim" class="ekran acik">
+  <button id="otoSec" class="yesil">📷 Otomatik Mod</button>
+  <p>Kamera sürekli açık, önüne gelen plakayı kendisi okur.</p>
+  <button id="manSec">✋ Manuel Mod</button>
+  <p>Otoparkçı plakaya tutar, “OKU” tuşuna basınca okur.</p>
 </div>
-<div class="btns">
-  <input id="elle" placeholder="Elle plaka (55ABC123)">
-  <button id="elleBtn" class="gri">Ekle</button>
+
+<!-- KAMERA EKRANI -->
+<div id="kamera" class="ekran">
+  <div id="cam"><video id="v" autoplay playsinline muted></video><div id="box"></div></div>
+  <div id="durum"></div>
+  <div id="sonuc"></div>
+  <div class="btns" id="manuelBtns"><button id="okuBtn" class="yesil">🔍 OKU</button></div>
+  <div class="btns">
+    <input id="elle" placeholder="Elle plaka (55ABC123)">
+    <button id="elleBtn" class="gri">Ekle</button>
+  </div>
 </div>
+
 <h3>İçeride olanlar</h3><ul id="aktif"></ul>
 <h3>Geçmiş</h3><ul id="gecmis"></ul>
 <div class="btns"><button id="silBtn" class="gri">Geçmişi Temizle</button></div>
 
 <script>
 const v=document.getElementById('v'), durum=document.getElementById('durum'), sonuc=document.getElementById('sonuc');
-let aktif={}, gecmis=[], worker=null, oto=true, mesgul=false, sonOkunan='', sonOkunanSay=0, sonIslem={};
-const BEKLEME=60000; // aynı plaka 60 sn içinde tekrar işlenmez
+let aktif={}, gecmis=[], worker=null, workerYukleniyor=null, mod=null, mesgul=false, sonOkunan='', sonOkunanSay=0, sonIslem={}, akis=null, zamanlayici=null;
+const BEKLEME=60000; // otomatikte aynı plaka 60 sn içinde tekrar işlenmez
 
 function yukle(){try{aktif=JSON.parse(localStorage.getItem('pl_aktif')||'{}');gecmis=JSON.parse(localStorage.getItem('pl_gecmis')||'[]');}catch(e){}}
 function kaydet(){try{localStorage.setItem('pl_aktif',JSON.stringify(aktif));localStorage.setItem('pl_gecmis',JSON.stringify(gecmis));}catch(e){}}
@@ -68,9 +86,9 @@ function ciz(){
 function goster(txt,sinif){sonuc.className=sinif;sonuc.innerHTML=txt;sonuc.style.display='block';
   try{navigator.vibrate&&navigator.vibrate(200);}catch(e){}}
 
-function islem(p){
+function islem(p,zorla){
   const simdi=Date.now();
-  if(sonIslem[p]&&simdi-sonIslem[p]<BEKLEME)return;
+  if(!zorla&&sonIslem[p]&&simdi-sonIslem[p]<BEKLEME)return;
   sonIslem[p]=simdi;
   if(aktif[p]){
     const g=aktif[p];delete aktif[p];gecmis.push({p:p,g:g,c:simdi});
@@ -86,7 +104,6 @@ function islem(p){
 function plakaBul(t){
   let s=(t||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
   s=s.replace(/^TR/,'');
-  // ilk iki hane rakam olmalı: harf karışıklıklarını düzelt
   const rak={O:'0',D:'0',Q:'0',I:'1',L:'1',Z:'2',S:'5',B:'8',G:'6',T:'7'};
   for(let i=0;i+4<=s.length;i++){
     let a=s.substr(i,2).split('').map(c=>rak[c]||c).join('');
@@ -98,53 +115,109 @@ function plakaBul(t){
   return null;
 }
 
-async function oku(){
-  if(mesgul||!worker||!v.videoWidth)return;
+async function kareOku(){
+  const vw=v.videoWidth,vh=v.videoHeight;
+  const c=document.createElement('canvas');
+  const sx=vw*0.1,sy=vh*0.38,sw=vw*0.8,sh=vh*0.24;
+  const olcek=Math.min(2,1000/sw);
+  c.width=sw*olcek;c.height=sh*olcek;
+  const x=c.getContext('2d');
+  x.filter='grayscale(1) contrast(1.8)';
+  x.drawImage(v,sx,sy,sw,sh,0,0,c.width,c.height);
+  const r=await worker.recognize(c);
+  return plakaBul(r.data.text);
+}
+
+// Otomatik: sürekli tarar, aynı plakayı 2 kez görünce kabul eder
+async function otoTur(){
+  if(mod!=='oto'||mesgul||!worker||!v.videoWidth)return;
   mesgul=true;
   try{
-    const vw=v.videoWidth,vh=v.videoHeight;
-    const c=document.createElement('canvas');
-    const sx=vw*0.1,sy=vh*0.38,sw=vw*0.8,sh=vh*0.24;
-    const olcek=Math.min(2,1000/sw);
-    c.width=sw*olcek;c.height=sh*olcek;
-    const x=c.getContext('2d');
-    x.filter='grayscale(1) contrast(1.8)';
-    x.drawImage(v,sx,sy,sw,sh,0,0,c.width,c.height);
-    const r=await worker.recognize(c);
-    const p=plakaBul(r.data.text);
+    const p=await kareOku();
+    if(mod!=='oto'){mesgul=false;return;}
     if(p){
       if(p===sonOkunan)sonOkunanSay++;else{sonOkunan=p;sonOkunanSay=1;}
       durum.textContent='Okunan: '+p;
-      if(sonOkunanSay>=2){islem(p);sonOkunanSay=0;}
+      if(sonOkunanSay>=2){islem(p,false);sonOkunanSay=0;}
     }else durum.textContent='Plakayı yeşil kutuya getirin…';
   }catch(e){durum.textContent='Okuma hatası';}
   mesgul=false;
 }
 
-async function basla(){
-  yukle();ciz();
-  try{
-    const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
-    v.srcObject=st;
-  }catch(e){durum.textContent='Kamera açılamadı (izin verin). Elle ekleyebilirsiniz.';}
-  durum.textContent='Okuyucu yükleniyor…';
-  try{
-    worker=await Tesseract.createWorker('eng');
-    await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',tessedit_pageseg_mode:'7'});
-    durum.textContent='Hazır. Plakayı yeşil kutuya getirin.';
-  }catch(e){durum.textContent='Okuyucu yüklenemedi (internet gerekli). Elle ekleyebilirsiniz.';}
-  setInterval(()=>{if(oto)oku();},1200);
+// Manuel: OKU'ya basınca birkaç kare dener, ilk bulduğunu işler
+async function manuelOku(){
+  if(mesgul)return;
+  if(!worker){durum.textContent='Okuyucu henüz yüklenmedi, bekleyin…';return;}
+  if(!v.videoWidth){durum.textContent='Kamera hazır değil';return;}
+  mesgul=true;const btn=document.getElementById('okuBtn');btn.disabled=true;btn.textContent='Okunuyor…';
+  let p=null;
+  for(let i=0;i<5&&!p&&mod==='man';i++){try{p=await kareOku();}catch(e){}}
+  if(mod==='man'){
+    if(p){durum.textContent='Okunan: '+p;islem(p,true);}
+    else durum.textContent='Okunamadı. Plakayı kutuya ortalayıp tekrar basın veya elle yazın.';
+  }
+  btn.disabled=false;btn.textContent='🔍 OKU';mesgul=false;
 }
 
-document.getElementById('otoBtn').onclick=function(){oto=!oto;this.textContent='Otomatik Okuma: '+(oto?'AÇIK':'KAPALI');this.className=oto?'':'gri';};
-document.getElementById('okuBtn').onclick=()=>{sonOkunanSay=1;oku();};
+function okuyucuHazirla(){
+  if(worker)return Promise.resolve();
+  if(workerYukleniyor)return workerYukleniyor;
+  workerYukleniyor=(async()=>{
+    const w=await Tesseract.createWorker('eng');
+    await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',tessedit_pageseg_mode:'7'});
+    worker=w;
+  })();
+  return workerYukleniyor;
+}
+
+async function kameraAc(){
+  try{
+    akis=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+    v.srcObject=akis;return true;
+  }catch(e){durum.textContent='Kamera açılamadı (izin verin). Elle ekleyebilirsiniz.';return false;}
+}
+function kameraKapat(){
+  if(akis){akis.getTracks().forEach(t=>t.stop());akis=null;}
+  v.srcObject=null;
+}
+
+async function modAc(m){
+  mod=m;sonOkunan='';sonOkunanSay=0;sonuc.style.display='none';
+  document.getElementById('secim').classList.remove('acik');
+  document.getElementById('kamera').classList.add('acik');
+  document.getElementById('geriBtn').style.display='';
+  document.getElementById('baslik').textContent=m==='oto'?'📷 Otomatik Mod':'✋ Manuel Mod';
+  document.getElementById('manuelBtns').style.display=m==='man'?'':'none';
+  durum.textContent='Kamera açılıyor…';
+  const ok=await kameraAc();
+  if(mod!==m){kameraKapat();return;}
+  if(!worker)durum.textContent='Okuyucu yükleniyor…';
+  try{await okuyucuHazirla();}catch(e){durum.textContent='Okuyucu yüklenemedi (internet gerekli). Elle ekleyebilirsiniz.';return;}
+  if(mod!==m)return;
+  if(ok)durum.textContent=m==='oto'?'Hazır. Plakayı yeşil kutuya getirin.':'Hazır. Plakayı kutuya getirip OKU’ya basın.';
+  if(m==='oto'){clearInterval(zamanlayici);zamanlayici=setInterval(otoTur,1200);}
+}
+
+function geri(){
+  mod=null;clearInterval(zamanlayici);zamanlayici=null;kameraKapat();
+  document.getElementById('kamera').classList.remove('acik');
+  document.getElementById('secim').classList.add('acik');
+  document.getElementById('geriBtn').style.display='none';
+  document.getElementById('baslik').textContent='🚗 Plaka Süre';
+}
+
+document.getElementById('otoSec').onclick=()=>modAc('oto');
+document.getElementById('manSec').onclick=()=>modAc('man');
+document.getElementById('geriBtn').onclick=geri;
+document.getElementById('okuBtn').onclick=manuelOku;
 document.getElementById('elleBtn').onclick=()=>{
   const p=plakaBul(document.getElementById('elle').value);
   if(!p){durum.textContent='Geçersiz plaka';return;}
-  delete sonIslem[p];islem(p);document.getElementById('elle').value='';};
+  islem(p,true);document.getElementById('elle').value='';};
 document.getElementById('silBtn').onclick=()=>{gecmis=[];kaydet();ciz();};
 setInterval(ciz,60000);
-basla();
+yukle();ciz();
+okuyucuHazirla().catch(()=>{}); // arka planda önceden yükle
 </script>
 </body>
 </html>
