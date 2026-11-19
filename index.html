@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plaka Süre</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,Arial,sans-serif;background:#111;color:#eee}
+header{padding:10px 14px;font-weight:700;font-size:18px;background:#1b1b1b}
+#cam{position:relative;width:100%;max-width:640px;margin:0 auto;background:#000}
+video{width:100%;display:block}
+#box{position:absolute;left:10%;top:38%;width:80%;height:24%;border:3px solid #0f0;border-radius:8px;pointer-events:none}
+#durum{text-align:center;padding:6px;font-size:14px;color:#aaa;min-height:26px}
+#sonuc{margin:8px 12px;padding:14px;border-radius:10px;font-size:20px;text-align:center;display:none}
+.giris{background:#1d4d1d}.cikis{background:#5a3a00}
+.btns{display:flex;gap:8px;padding:8px 12px;flex-wrap:wrap}
+button{flex:1;padding:12px;font-size:16px;border:0;border-radius:8px;background:#2d6cdf;color:#fff}
+button.gri{background:#444}
+input{flex:2;padding:12px;font-size:16px;border-radius:8px;border:0;text-transform:uppercase}
+h3{margin:14px 12px 4px;font-size:15px;color:#9cf}
+ul{list-style:none;margin:0;padding:0 12px}
+li{padding:8px;border-bottom:1px solid #333;font-size:14px}
+li b{font-size:16px}
+</style>
+</head>
+<body>
+<header>🚗 Plaka Süre</header>
+<div id="cam"><video id="v" autoplay playsinline muted></video><div id="box"></div></div>
+<div id="durum">Kamera açılıyor…</div>
+<div id="sonuc"></div>
+<div class="btns">
+  <button id="otoBtn">Otomatik Okuma: AÇIK</button>
+  <button id="okuBtn" class="gri">Şimdi Oku</button>
+</div>
+<div class="btns">
+  <input id="elle" placeholder="Elle plaka (55ABC123)">
+  <button id="elleBtn" class="gri">Ekle</button>
+</div>
+<h3>İçeride olanlar</h3><ul id="aktif"></ul>
+<h3>Geçmiş</h3><ul id="gecmis"></ul>
+<div class="btns"><button id="silBtn" class="gri">Geçmişi Temizle</button></div>
+
+<script>
+const v=document.getElementById('v'), durum=document.getElementById('durum'), sonuc=document.getElementById('sonuc');
+let aktif={}, gecmis=[], worker=null, oto=true, mesgul=false, sonOkunan='', sonOkunanSay=0, sonIslem={};
+const BEKLEME=60000; // aynı plaka 60 sn içinde tekrar işlenmez
+
+function yukle(){try{aktif=JSON.parse(localStorage.getItem('pl_aktif')||'{}');gecmis=JSON.parse(localStorage.getItem('pl_gecmis')||'[]');}catch(e){}}
+function kaydet(){try{localStorage.setItem('pl_aktif',JSON.stringify(aktif));localStorage.setItem('pl_gecmis',JSON.stringify(gecmis));}catch(e){}}
+function saat(t){const d=new Date(t);return d.toLocaleDateString('tr-TR')+' '+d.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});}
+function sure(ms){const dk=Math.floor(ms/60000),s=Math.floor(dk/60),k=dk%60;
+  if(s>=24){const g=Math.floor(s/24);return g+' gün '+(s%24)+' saat '+k+' dk';}
+  return s>0?(s+' saat '+k+' dk'):(k+' dk');}
+
+function ciz(){
+  const a=document.getElementById('aktif');a.innerHTML='';
+  Object.keys(aktif).forEach(p=>{const li=document.createElement('li');
+    li.innerHTML='<b>'+p+'</b> — giriş: '+saat(aktif[p])+' ('+sure(Date.now()-aktif[p])+')';a.appendChild(li);});
+  if(!a.innerHTML)a.innerHTML='<li>Yok</li>';
+  const g=document.getElementById('gecmis');g.innerHTML='';
+  gecmis.slice().reverse().forEach(r=>{const li=document.createElement('li');
+    li.innerHTML='<b>'+r.p+'</b> — '+saat(r.g)+' → '+saat(r.c)+' = <b>'+sure(r.c-r.g)+'</b>';g.appendChild(li);});
+  if(!g.innerHTML)g.innerHTML='<li>Yok</li>';
+}
+
+function goster(txt,sinif){sonuc.className=sinif;sonuc.innerHTML=txt;sonuc.style.display='block';
+  try{navigator.vibrate&&navigator.vibrate(200);}catch(e){}}
+
+function islem(p){
+  const simdi=Date.now();
+  if(sonIslem[p]&&simdi-sonIslem[p]<BEKLEME)return;
+  sonIslem[p]=simdi;
+  if(aktif[p]){
+    const g=aktif[p];delete aktif[p];gecmis.push({p:p,g:g,c:simdi});
+    goster('<b>'+p+'</b><br>Giriş: '+saat(g)+'<br>Çıkış: '+saat(simdi)+'<br>⏱ <b>'+sure(simdi-g)+' geçmiş</b>','cikis');
+  }else{
+    aktif[p]=simdi;
+    goster('<b>'+p+'</b> kaydedildi<br>'+saat(simdi),'giris');
+  }
+  kaydet();ciz();
+}
+
+// OCR metninden Türk plakası çıkar
+function plakaBul(t){
+  let s=(t||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  s=s.replace(/^TR/,'');
+  // ilk iki hane rakam olmalı: harf karışıklıklarını düzelt
+  const rak={O:'0',D:'0',Q:'0',I:'1',L:'1',Z:'2',S:'5',B:'8',G:'6',T:'7'};
+  for(let i=0;i+4<=s.length;i++){
+    let a=s.substr(i,2).split('').map(c=>rak[c]||c).join('');
+    if(!/^(0[1-9]|[1-7][0-9]|8[01])$/.test(a))continue;
+    const m=s.substr(i+2).match(/^([A-Z]{1,3})([0-9OIZSB]{2,4})/);
+    if(m){const n=m[2].split('').map(c=>rak[c]||c).join('');
+      const p=a+m[1]+n; if(p.length>=6&&p.length<=8)return a+' '+m[1]+' '+n;}
+  }
+  return null;
+}
+
+async function oku(){
+  if(mesgul||!worker||!v.videoWidth)return;
+  mesgul=true;
+  try{
+    const vw=v.videoWidth,vh=v.videoHeight;
+    const c=document.createElement('canvas');
+    const sx=vw*0.1,sy=vh*0.38,sw=vw*0.8,sh=vh*0.24;
+    const olcek=Math.min(2,1000/sw);
+    c.width=sw*olcek;c.height=sh*olcek;
+    const x=c.getContext('2d');
+    x.filter='grayscale(1) contrast(1.8)';
+    x.drawImage(v,sx,sy,sw,sh,0,0,c.width,c.height);
+    const r=await worker.recognize(c);
+    const p=plakaBul(r.data.text);
+    if(p){
+      if(p===sonOkunan)sonOkunanSay++;else{sonOkunan=p;sonOkunanSay=1;}
+      durum.textContent='Okunan: '+p;
+      if(sonOkunanSay>=2){islem(p);sonOkunanSay=0;}
+    }else durum.textContent='Plakayı yeşil kutuya getirin…';
+  }catch(e){durum.textContent='Okuma hatası';}
+  mesgul=false;
+}
+
+async function basla(){
+  yukle();ciz();
+  try{
+    const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+    v.srcObject=st;
+  }catch(e){durum.textContent='Kamera açılamadı (izin verin). Elle ekleyebilirsiniz.';}
+  durum.textContent='Okuyucu yükleniyor…';
+  try{
+    worker=await Tesseract.createWorker('eng');
+    await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',tessedit_pageseg_mode:'7'});
+    durum.textContent='Hazır. Plakayı yeşil kutuya getirin.';
+  }catch(e){durum.textContent='Okuyucu yüklenemedi (internet gerekli). Elle ekleyebilirsiniz.';}
+  setInterval(()=>{if(oto)oku();},1200);
+}
+
+document.getElementById('otoBtn').onclick=function(){oto=!oto;this.textContent='Otomatik Okuma: '+(oto?'AÇIK':'KAPALI');this.className=oto?'':'gri';};
+document.getElementById('okuBtn').onclick=()=>{sonOkunanSay=1;oku();};
+document.getElementById('elleBtn').onclick=()=>{
+  const p=plakaBul(document.getElementById('elle').value);
+  if(!p){durum.textContent='Geçersiz plaka';return;}
+  delete sonIslem[p];islem(p);document.getElementById('elle').value='';};
+document.getElementById('silBtn').onclick=()=>{gecmis=[];kaydet();ciz();};
+setInterval(ciz,60000);
+basla();
+</script>
+</body>
+</html>
